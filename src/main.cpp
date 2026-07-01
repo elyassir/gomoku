@@ -155,7 +155,8 @@ int main() {
         }
 
         // Update window title to reflect game state.
-        // Win state overrides the turn indicator; R to restart is shown as a hint.
+        // Capture counts are always shown so players can track progress toward the
+        // 10-stone capture win without needing extra UI elements.
         std::string title = "Gomoku — ";
         switch (game.state()) {
             case GameState::BlackWins: title += "Black wins!  (R to restart)"; break;
@@ -165,6 +166,8 @@ int main() {
                              ? "Black's turn" : "White's turn";
                 break;
         }
+        title += "   [B captures: " + std::to_string(game.captureCount(Player::Black))
+               + "  W captures: "  + std::to_string(game.captureCount(Player::White)) + "]";
         window.setTitle(title);
 
         window.clear();
