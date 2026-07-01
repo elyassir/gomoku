@@ -8,7 +8,8 @@ SRC_DIR  = src
 OBJ_DIR  = obj
 
 SRCS     = $(SRC_DIR)/main.cpp \
-           $(SRC_DIR)/Board.cpp
+           $(SRC_DIR)/Board.cpp \
+           $(SRC_DIR)/Game.cpp
 
 OBJS     = $(SRCS:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
