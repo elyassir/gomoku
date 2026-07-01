@@ -41,4 +41,15 @@ private:
     // Flip Black→White or White→Black.
     // A private helper so togglePlayer() is the single place that changes turns.
     void togglePlayer();
+
+    // Count consecutive stones of type `stone` starting from (row, col)
+    // and stepping by (delta_row, delta_col) until the edge or a different cell.
+    // Does NOT count the origin cell itself — callers add 1 for the placed stone.
+    // Reused in Phase 8 (heuristic) to scan the same 4 axes.
+    int countInDirection(int row, int col, int delta_row, int delta_col, Cell stone) const;
+
+    // After a stone is placed at (row, col), scan all 4 axes through it.
+    // Only checks lines that pass through the placed stone — not the whole board.
+    // Sets _state to BlackWins or WhiteWins if any axis reaches 5+.
+    void checkAlignment(int row, int col, Cell stone);
 };

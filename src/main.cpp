@@ -129,6 +129,11 @@ int main() {
                 event.key.code == sf::Keyboard::Escape)
                 window.close();
 
+            // 'R' restarts the game from any state (mid-game or after a win).
+            if (event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::R)
+                game = Game();
+
             // Left-click: attempt to place a stone at the nearest intersection.
             if (event.type == sf::Event::MouseButtonPressed &&
                 event.mouseButton.button == sf::Mouse::Left) {
@@ -149,10 +154,17 @@ int main() {
             }
         }
 
-        // Update window title each frame to reflect whose turn it is.
-        // Cheap operation — a board game runs at 60 fps so this never costs anything.
+        // Update window title to reflect game state.
+        // Win state overrides the turn indicator; R to restart is shown as a hint.
         std::string title = "Gomoku — ";
-        title += (game.currentPlayer() == Player::Black) ? "Black's turn" : "White's turn";
+        switch (game.state()) {
+            case GameState::BlackWins: title += "Black wins!  (R to restart)"; break;
+            case GameState::WhiteWins: title += "White wins!  (R to restart)"; break;
+            case GameState::Ongoing:
+                title += (game.currentPlayer() == Player::Black)
+                             ? "Black's turn" : "White's turn";
+                break;
+        }
         window.setTitle(title);
 
         window.clear();
