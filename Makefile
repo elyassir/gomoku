@@ -1,7 +1,7 @@
 NAME     = Gomoku
 
 CXX      = c++
-CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -Iinclude
+CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -Iinclude -O3 -march=native
 LDFLAGS  = -lsfml-graphics -lsfml-window -lsfml-system
 
 SRC_DIR  = src
