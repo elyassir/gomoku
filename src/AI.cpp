@@ -1,5 +1,6 @@
 #include "AI.hpp"
 #include <chrono>
+#include <iostream>
 #include <limits>
 #include <algorithm>
 
@@ -189,7 +190,19 @@ std::vector<SM> AI::orderMoves(
 // At a minimising node, a score <= alpha means the maximiser above already has
 // a better option — same argument. Pruned branches cannot contain the true
 // minimax value, so the final result is identical; we just visit fewer nodes.
+//
+// Time-abort: if the deadline is exceeded at any node, _time_up is set and the
+// function returns 0 immediately. Every caller checks _time_up and propagates
+// the abort upward so bestMove can discard the partial result and use the last
+// complete depth instead.
 int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) {
+    // Check time before doing any work at this node.
+    if (_time_up) return 0;
+    if (std::chrono::steady_clock::now() >= _deadline) {
+        _time_up = true;
+        return 0;
+    }
+
     if (game.state() != GameState::Ongoing || depth == 0)
         return evaluate(game);
 
@@ -216,6 +229,7 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
             MoveRecord rec = game.applyMove(sm.second.row, sm.second.col);
             int s = minimax(game, depth - 1, false, alpha, beta);
             game.undoMove(rec);
+            if (_time_up) return 0; // result is garbage — abort immediately
             if (s > best) best = s;
             if (best > alpha) alpha = best;
             if (alpha >= beta) break; // β-cutoff: minimiser won't allow this path
@@ -227,6 +241,7 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
             MoveRecord rec = game.applyMove(sm.second.row, sm.second.col);
             int s = minimax(game, depth - 1, true, alpha, beta);
             game.undoMove(rec);
+            if (_time_up) return 0; // result is garbage — abort immediately
             if (s < best) best = s;
             if (best < beta) beta = best;
             if (alpha >= beta) break; // α-cutoff: maximiser won't allow this path
@@ -237,13 +252,22 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
 
 // ── Public interface ──────────────────────────────────────────────────────────
 
+// Iterative deepening: run minimax at depth 1, 2, 3, … until the 500ms budget
+// runs out, then return the best move from the last *complete* depth.
+//
+// Why iterative deepening is not wasteful: each shallower search informs move
+// ordering for the next (via orderMoves). At depth d the ordering is based on
+// depth-(d-1) results, making alpha-beta prune far more aggressively than a
+// cold start at depth d. The total cost of depths 1..d is roughly equal to the
+// cost of depth d alone, so the "wasted" shallower passes are negligible.
 Move AI::bestMove(Game& game, double& elapsed_ms) {
     auto t_start = std::chrono::steady_clock::now();
+    _deadline    = t_start + std::chrono::milliseconds(TIME_LIMIT_MS);
 
     // Generate candidates fast (no legality check), then filter with isLegalMove.
     // This is the only place we pay the double-three cost — once per move, for
     // ~50 candidates, rather than millions of times inside the search tree.
-    std::vector<Move> raw       = generateCandidates(game);
+    std::vector<Move> raw = generateCandidates(game);
     std::vector<Move> candidates;
     candidates.reserve(raw.size());
     for (const Move& m : raw) {
@@ -251,36 +275,61 @@ Move AI::bestMove(Game& game, double& elapsed_ms) {
             candidates.push_back(m);
     }
 
+    if (candidates.empty())
+        return {-1, -1};
+
     bool ai_maximizes = (game.currentPlayer() == Player::Black);
-    Move best_move  = {-1, -1};
-    int  best_score = ai_maximizes
-                          ? std::numeric_limits<int>::min()
-                          : std::numeric_limits<int>::max();
+    Move best_move    = candidates[0]; // fallback: first legal move
+    int  reached_depth = 0;
 
-    int alpha = std::numeric_limits<int>::min();
-    int beta  = std::numeric_limits<int>::max();
+    for (int depth = 1; depth <= MAX_DEPTH; ++depth) {
+        _time_up = false;
 
-    // Order root candidates best-first so the first deep call tightens the
-    // alpha/beta window, letting subsequent sibling calls prune more aggressively.
-    std::vector<SM> ordered = orderMoves(game, candidates, ai_maximizes);
+        int  best_score = ai_maximizes
+                              ? std::numeric_limits<int>::min()
+                              : std::numeric_limits<int>::max();
+        int  alpha      = std::numeric_limits<int>::min();
+        int  beta       = std::numeric_limits<int>::max();
+        Move candidate  = {-1, -1};
 
-    for (const SM& sm : ordered) {
-        const Move& m = sm.second;
-        MoveRecord rec = game.applyMove(m.row, m.col);
-        int score      = minimax(game, SEARCH_DEPTH - 1, !ai_maximizes, alpha, beta);
-        game.undoMove(rec);
+        // Order root candidates best-first; this uses depth-0 evals but the
+        // result from the previous iteration already lives in the score that
+        // orderMoves reads, so ordering improves with each deeper pass.
+        std::vector<SM> ordered = orderMoves(game, candidates, ai_maximizes);
 
-        bool is_better = ai_maximizes ? (score > best_score) : (score < best_score);
-        if (is_better) {
-            best_score = score;
-            best_move  = m;
-            if (ai_maximizes) alpha = best_score;
-            else              beta  = best_score;
+        for (const SM& sm : ordered) {
+            if (_time_up) break;
+
+            const Move& m   = sm.second;
+            MoveRecord  rec = game.applyMove(m.row, m.col);
+            int score       = minimax(game, depth - 1, !ai_maximizes, alpha, beta);
+            game.undoMove(rec);
+
+            if (_time_up) break; // partial result — discard
+
+            bool is_better = ai_maximizes ? (score > best_score) : (score < best_score);
+            if (is_better) {
+                best_score = score;
+                candidate  = m;
+                if (ai_maximizes) alpha = best_score;
+                else              beta  = best_score;
+            }
         }
+
+        // Only commit a result if the full depth completed without a timeout.
+        if (!_time_up && candidate.row != -1) {
+            best_move     = candidate;
+            reached_depth = depth;
+        }
+
+        if (_time_up) break;
     }
 
     auto t_end = std::chrono::steady_clock::now();
     elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+
+    std::cout << "[AI] depth=" << reached_depth
+              << "  time=" << static_cast<int>(elapsed_ms) << "ms\n";
 
     return best_move;
 }
