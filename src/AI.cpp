@@ -70,6 +70,9 @@ int AI::evaluate(const Game& game) const {
     // Each captured stone is progress toward the 10-stone capture win.
     int score = (game.captureCount(Player::Black) - game.captureCount(Player::White)) * 300;
 
+    // Track each side's strongest individual sequence for the tempo check below.
+    int black_max = 0, white_max = 0;
+
     const int axes[4][2] = {{0,1},{1,0},{1,1},{1,-1}};
 
     // ── Pass 1: continuous sequences ─────────────────────────────────────────
@@ -112,11 +115,25 @@ int AI::evaluate(const Game& game) const {
                 else if (len == 3) weight = (open_ends == 2) ?   5'000 :    500;
                 else if (len == 2) weight = (open_ends == 2) ?     100 :     20;
 
-                if (cell == Cell::Black) score += weight;
-                else                     score -= weight;
+                if (cell == Cell::Black) {
+                    score += weight;
+                    if (weight > black_max) black_max = weight;
+                } else {
+                    score -= weight;
+                    if (weight > white_max) white_max = weight;
+                }
             }
         }
     }
+
+    // Tempo: at a leaf the current player's open four is a guaranteed win next move
+    // (the opponent can only block one end at a time). Without this, the search can
+    // "cancel" an opponent's open four by building its own, netting to 0 — but the
+    // opponent goes first and wins before we ever get our open four off the ground.
+    if (game.currentPlayer() == Player::Black && black_max >= 100'000)
+        return  900'000;
+    if (game.currentPlayer() == Player::White && white_max >= 100'000)
+        return -900'000;
 
     return score;
 }
