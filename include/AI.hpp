@@ -17,7 +17,12 @@ public:
 private:
     // Depth 4 is viable with move ordering: ordering shrinks the tree from O(b^d)
     // toward O(b^(d/2)), making depth 4 cheaper than depth 3 without ordering.
-    static constexpr int SEARCH_DEPTH = 4;
+    static constexpr int SEARCH_DEPTH    = 4;
+    // Max candidates explored per node after ordering. Without a cap, ordering
+    // evaluates ~50 candidates × 50^(d-1) nodes = ordering cost ≈ full search cost.
+    // Capping at 15 reduces the per-node multiplier to 15^(d-1), making the
+    // ordering overhead negligible while keeping the quality candidates.
+    static constexpr int MAX_CANDIDATES  = 15;
 
     // Collect all empty cells within 2 cells of any existing stone.
     // No legality check — used inside the search tree where the double-three

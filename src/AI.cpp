@@ -140,19 +140,24 @@ int AI::evaluate(const Game& game) const {
 
 // ── Move ordering ─────────────────────────────────────────────────────────────
 
-// Score each candidate with a depth-0 evaluate (apply → score → undo) and
-// return the candidates sorted best-first for the given side.
+// Score each candidate with a depth-0 evaluate (apply → score → undo), sort
+// best-first for the given side, and return at most MAX_CANDIDATES entries.
 //
-// Why this matters: alpha-beta prunes a branch the moment alpha >= beta.
-// That can only fire if a good move has already been tried and tightened the
-// window. With random ordering, good moves come last → almost no pruning.
-// With best-first ordering, the very first candidate tightens the window and
-// subsequent siblings are cut after a single evaluate call. Empirically this
-// shrinks the search tree from O(b^d) to near O(b^(d/2)).
+// Why ordering helps: alpha-beta prunes once alpha >= beta. That fires only
+// after a GOOD move tightens the window. With random order, good moves come
+// last and almost no pruning happens. With best-first, the first candidate
+// tightens the window immediately and siblings are cut after one evaluate call.
+// This shrinks the tree from O(b^d) toward O(b^(d/2)).
 //
-// Cost per node: N shallow evaluates before we recurse. That overhead is
-// outweighed by the node reduction at all deeper levels, so the net effect
-// is a large speedup that lets us raise SEARCH_DEPTH without hurting latency.
+// Why we cap at MAX_CANDIDATES: without a cap, the ordering evaluates ~50
+// candidates per node. At depth=4 that is 50^3 = 125 000 extra evaluate calls —
+// about as expensive as the whole unordered search. Limiting to 15 drops the
+// per-node multiplier to 15^3 = 3 375, making the ordering overhead negligible
+// while the pruning gain still dominates.
+//
+// Why we skip ordering at depth == 1: depth=1 nodes call evaluate() on leaves
+// directly — there is nothing left to prune below them. The 50-eval ordering
+// overhead per node exceeds the tiny pruning benefit at this last ply.
 using SM = std::pair<int, Move>;  // (shallow_score, move) for sort
 
 std::vector<SM> AI::orderMoves(
@@ -171,6 +176,8 @@ std::vector<SM> AI::orderMoves(
     else
         std::sort(out.begin(), out.end(),
             [](const SM& a, const SM& b){ return a.first < b.first; });
+    if ((int)out.size() > MAX_CANDIDATES)
+        out.resize(MAX_CANDIDATES);
     return out;
 }
 
@@ -190,8 +197,18 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
     if (raw.empty())
         return 0;
 
-    // Order moves best-first so alpha-beta cuts fire as early as possible.
-    std::vector<SM> ordered = orderMoves(game, raw, is_maximizing);
+    // At depth=1 (just before leaves) ordering costs more than it saves:
+    // the 50-eval overhead per node exceeds the alpha-beta benefit at one ply.
+    // Use unordered raw candidates there, capped to MAX_CANDIDATES.
+    std::vector<SM> ordered;
+    if (depth >= 2) {
+        ordered = orderMoves(game, raw, is_maximizing);
+    } else {
+        int lim = std::min((int)raw.size(), MAX_CANDIDATES);
+        ordered.reserve(lim);
+        for (int i = 0; i < lim; ++i)
+            ordered.push_back({0, raw[i]});
+    }
 
     if (is_maximizing) {
         int best = std::numeric_limits<int>::min();
