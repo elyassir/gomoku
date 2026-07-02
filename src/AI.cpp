@@ -138,6 +138,42 @@ int AI::evaluate(const Game& game) const {
     return score;
 }
 
+// ── Move ordering ─────────────────────────────────────────────────────────────
+
+// Score each candidate with a depth-0 evaluate (apply → score → undo) and
+// return the candidates sorted best-first for the given side.
+//
+// Why this matters: alpha-beta prunes a branch the moment alpha >= beta.
+// That can only fire if a good move has already been tried and tightened the
+// window. With random ordering, good moves come last → almost no pruning.
+// With best-first ordering, the very first candidate tightens the window and
+// subsequent siblings are cut after a single evaluate call. Empirically this
+// shrinks the search tree from O(b^d) to near O(b^(d/2)).
+//
+// Cost per node: N shallow evaluates before we recurse. That overhead is
+// outweighed by the node reduction at all deeper levels, so the net effect
+// is a large speedup that lets us raise SEARCH_DEPTH without hurting latency.
+using SM = std::pair<int, Move>;  // (shallow_score, move) for sort
+
+std::vector<SM> AI::orderMoves(
+    Game& game, const std::vector<Move>& moves, bool want_high)
+{
+    std::vector<SM> out;
+    out.reserve(moves.size());
+    for (const Move& m : moves) {
+        MoveRecord rec = game.applyMove(m.row, m.col);
+        out.push_back({evaluate(game), m});
+        game.undoMove(rec);
+    }
+    if (want_high)
+        std::sort(out.begin(), out.end(),
+            [](const SM& a, const SM& b){ return a.first > b.first; });
+    else
+        std::sort(out.begin(), out.end(),
+            [](const SM& a, const SM& b){ return a.first < b.first; });
+    return out;
+}
+
 // ── Minimax with alpha-beta pruning ──────────────────────────────────────────
 
 // Why alpha-beta is safe (returns the same move as plain minimax):
@@ -150,14 +186,17 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
     if (game.state() != GameState::Ongoing || depth == 0)
         return evaluate(game);
 
-    std::vector<Move> candidates = generateCandidates(game);
-    if (candidates.empty())
+    std::vector<Move> raw = generateCandidates(game);
+    if (raw.empty())
         return 0;
+
+    // Order moves best-first so alpha-beta cuts fire as early as possible.
+    std::vector<SM> ordered = orderMoves(game, raw, is_maximizing);
 
     if (is_maximizing) {
         int best = std::numeric_limits<int>::min();
-        for (const Move& m : candidates) {
-            MoveRecord rec = game.applyMove(m.row, m.col);
+        for (const SM& sm : ordered) {
+            MoveRecord rec = game.applyMove(sm.second.row, sm.second.col);
             int s = minimax(game, depth - 1, false, alpha, beta);
             game.undoMove(rec);
             if (s > best) best = s;
@@ -167,8 +206,8 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
         return best;
     } else {
         int best = std::numeric_limits<int>::max();
-        for (const Move& m : candidates) {
-            MoveRecord rec = game.applyMove(m.row, m.col);
+        for (const SM& sm : ordered) {
+            MoveRecord rec = game.applyMove(sm.second.row, sm.second.col);
             int s = minimax(game, depth - 1, true, alpha, beta);
             game.undoMove(rec);
             if (s < best) best = s;
@@ -204,7 +243,12 @@ Move AI::bestMove(Game& game, double& elapsed_ms) {
     int alpha = std::numeric_limits<int>::min();
     int beta  = std::numeric_limits<int>::max();
 
-    for (const Move& m : candidates) {
+    // Order root candidates best-first so the first deep call tightens the
+    // alpha/beta window, letting subsequent sibling calls prune more aggressively.
+    std::vector<SM> ordered = orderMoves(game, candidates, ai_maximizes);
+
+    for (const SM& sm : ordered) {
+        const Move& m = sm.second;
         MoveRecord rec = game.applyMove(m.row, m.col);
         int score      = minimax(game, SEARCH_DEPTH - 1, !ai_maximizes, alpha, beta);
         game.undoMove(rec);

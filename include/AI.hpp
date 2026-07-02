@@ -15,11 +15,9 @@ public:
     Move bestMove(Game& game, double& elapsed_ms);
 
 private:
-    // Depth 3 is the safe ceiling without move ordering.
-    // Alpha-beta only prunes well when the best moves come first — with random
-    // ordering the pruning is modest and depth 4 still explodes in mid-game.
-    // Phase 9 (move ordering + iterative deepening) will unlock depth 5+.
-    static constexpr int SEARCH_DEPTH = 3;
+    // Depth 4 is viable with move ordering: ordering shrinks the tree from O(b^d)
+    // toward O(b^(d/2)), making depth 4 cheaper than depth 3 without ordering.
+    static constexpr int SEARCH_DEPTH = 4;
 
     // Collect all empty cells within 2 cells of any existing stone.
     // No legality check — used inside the search tree where the double-three
@@ -31,6 +29,11 @@ private:
     // Scores the board from Black's perspective:
     //   positive → Black advantaged, negative → White advantaged.
     int evaluate(const Game& game) const;
+
+    // Score candidates with a depth-0 evaluate and return them sorted best-first.
+    // want_high=true for the maximiser, false for the minimiser.
+    std::vector<std::pair<int,Move>> orderMoves(
+        Game& game, const std::vector<Move>& moves, bool want_high);
 
     // Minimax with alpha-beta pruning.
     // alpha: best score Black can already guarantee on the path to this node.
