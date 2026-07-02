@@ -79,8 +79,14 @@ private:
     // Does NOT count the origin — callers add 1 for the placed stone.
     int countInDirection(int row, int col, int delta_row, int delta_col, Cell stone) const;
 
-    // Scan all 4 axes through the placed stone; set _state to a win if 5+ align.
+    // Scan all 4 axes through the placed stone; set _state to a win if 5+ align
+    // AND the opponent cannot immediately break the line by capturing from it.
     void checkAlignment(int row, int col, Cell stone);
+
+    // Returns true if the opponent has a legal capture move that removes at least
+    // one stone from the winning line along axis (dr, dc) through (row, col).
+    // Used by checkAlignment: if the line is breakable, it is not yet a win.
+    bool isAlignmentBreakable(int row, int col, Cell stone, int dr, int dc) const;
 
     // Scan all 8 directions for the pattern Me Opp Opp Me.
     // Remove any matching pairs, update capture counters, and record pairs in `record`.

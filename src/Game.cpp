@@ -154,16 +154,23 @@ int Game::countInDirection(int row, int col, int delta_row, int delta_col, Cell 
     return count;
 }
 
-// Scan 4 axes through the placed stone; set _state to a win if 5+ align.
-// Only the stone just played needs to be checked — any pre-existing 5-in-a-row
-// would have triggered the win on a previous turn.
-// Note: Phase 5 makes this conditional on whether the opponent can break the
-// line with a capture. For now, 5-in-a-row is an instant win.
+// Scan 4 axes through the placed stone.
+// An axis declares a win only if it has 5+ consecutive same-color stones AND
+// the opponent cannot immediately break that line by capturing a pair from it.
+//
+// Why the breakability check?
+//   The rules say a 5-in-a-row is only a real win when the opponent has no
+//   capture available on that line. If they do, the game continues — they get
+//   their turn to execute the break. If that breaking capture reaches 10 stones,
+//   they win by capture instead (checkCaptureWin handles that on their turn).
+//
+// We check all 4 axes before returning so that a player with simultaneous
+// alignments on multiple axes wins if ANY of them is unbreakable.
 void Game::checkAlignment(int row, int col, Cell stone) {
     const int axes[4][2] = {
-        {0, 1},   // horizontal →
-        {1, 0},   // vertical   ↓
-        {1, 1},   // diagonal   ↘
+        {0,  1},  // horizontal →
+        {1,  0},  // vertical   ↓
+        {1,  1},  // diagonal   ↘
         {1, -1}   // anti-diag  ↙
     };
 
@@ -175,13 +182,69 @@ void Game::checkAlignment(int row, int col, Cell stone) {
             + countInDirection(row, col,  dr,  dc, stone)
             + countInDirection(row, col, -dr, -dc, stone);
 
-        if (total >= 5) {
+        if (total >= 5 && !isAlignmentBreakable(row, col, stone, dr, dc)) {
             _state = (_current_player == Player::Black)
                          ? GameState::BlackWins
                          : GameState::WhiteWins;
-            return;
+            return; // one unbreakable alignment is enough
         }
     }
+}
+
+// Check every stone in the winning line to see if the opponent can capture it.
+// A stone in the line is capturable when an adjacent same-color stone exists
+// and the flanking cells form a valid Me Opp Opp Me opportunity for the opponent.
+//
+// The two cases for a pair (S1, S2) being captured by the opponent:
+//   Case A: [opponent_existing] S1 S2 [empty]      → opponent plays at the empty end
+//   Case B: [empty]             S1 S2 [opponent_existing] → opponent plays at the empty end
+//
+// We check all 8 directions from each line stone so both pair orderings and all
+// axes are covered.
+bool Game::isAlignmentBreakable(int row, int col, Cell stone, int dr, int dc) const {
+    Cell opponent = (stone == Cell::Black) ? Cell::White : Cell::Black;
+
+    // Walk the full extent of the winning line along this axis.
+    int fwd = countInDirection(row, col,  dr,  dc, stone);
+    int bwd = countInDirection(row, col, -dr, -dc, stone);
+
+    for (int i = -bwd; i <= fwd; ++i) {
+        int r = row + i * dr;
+        int c = col + i * dc;
+
+        // Try every direction as the pair axis (S1 at (r,c), S2 one step ahead).
+        const int dirs[8][2] = {
+            { 0, 1}, { 0,-1}, { 1, 0}, {-1, 0},
+            { 1, 1}, {-1,-1}, { 1,-1}, {-1, 1}
+        };
+
+        for (auto& d : dirs) {
+            int d_r = d[0], d_c = d[1];
+
+            int r2 = r + d_r,     c2 = c + d_c;     // S2 (pair partner)
+            int rf = r + 2 * d_r, cf = c + 2 * d_c; // far  flank position
+            int rn = r - d_r,     cn = c - d_c;      // near flank position
+
+            // All three surrounding cells must be on the board.
+            if (r2 < 0 || r2 >= BOARD_SIZE || c2 < 0 || c2 >= BOARD_SIZE) continue;
+            if (rf < 0 || rf >= BOARD_SIZE || cf < 0 || cf >= BOARD_SIZE) continue;
+            if (rn < 0 || rn >= BOARD_SIZE || cn < 0 || cn >= BOARD_SIZE) continue;
+
+            // S2 must be the same color (forming the capturable pair with S1).
+            if (_board.get(r2, c2) != stone) continue;
+
+            // Case A: opponent already at near flank, empty at far flank.
+            // Opponent plays at far to complete: [opp] S1 S2 [opp_new].
+            if (_board.get(rn, cn) == opponent && _board.get(rf, cf) == Cell::Empty)
+                return true;
+
+            // Case B: empty at near flank, opponent already at far flank.
+            // Opponent plays at near to complete: [opp_new] S1 S2 [opp].
+            if (_board.get(rn, cn) == Cell::Empty && _board.get(rf, cf) == opponent)
+                return true;
+        }
+    }
+    return false;
 }
 
 // Scan all 8 directions from the placed stone looking for Me Opp Opp Me.
