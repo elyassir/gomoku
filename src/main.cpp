@@ -1,7 +1,10 @@
 #include <SFML/Graphics.hpp>
-#include <cmath>   // std::round
-#include <string>  // window title construction
+#include <cmath>     // std::round
+#include <string>    // window title construction
+#include <iostream>  // move log
+#include <iomanip>   // std::setw
 #include "Game.hpp"
+#include "AI.hpp"
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 static constexpr int   WINDOW_SIZE = 700;
@@ -106,6 +109,27 @@ static void drawStones(sf::RenderWindow& window, const Board& board) {
     }
 }
 
+// ── Move logger ───────────────────────────────────────────────────────────────
+
+// Columns A–S (19 letters), rows 1–19 from the top — standard Gomoku notation.
+static std::string toNotation(int row, int col) {
+    return std::string(1, static_cast<char>('A' + col)) + std::to_string(row + 1);
+}
+
+static void logMove(int move_num, const char* player, int row, int col,
+                    int captures, double ai_ms) {
+    // std::left is sticky in std::cout — reset to std::right after each use
+    // so the move number stays right-aligned in subsequent calls.
+    std::cout << "[" << std::right << std::setw(2) << move_num << "] "
+              << std::left << std::setw(10) << player << std::right
+              << toNotation(row, col);
+    if (captures > 0)
+        std::cout << "  captures:" << captures;
+    if (ai_ms >= 0.0)
+        std::cout << "  " << static_cast<int>(ai_ms) << "ms";
+    std::cout << "\n";
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 int main() {
     sf::RenderWindow window(
@@ -115,7 +139,12 @@ int main() {
     );
     window.setFramerateLimit(60);
 
-    Game game; // owns the board, the turn, and the game state
+    Game   game;
+    AI     ai;
+    double last_ai_ms = -1.0;
+    int    move_number = 0;
+
+    std::cout << "=== Game Start ===\n";
 
     // ── Main loop ─────────────────────────────────────────────────────────────
     while (window.isOpen()) {
@@ -131,12 +160,19 @@ int main() {
 
             // 'R' restarts the game from any state (mid-game or after a win).
             if (event.type == sf::Event::KeyPressed &&
-                event.key.code == sf::Keyboard::R)
-                game = Game();
+                event.key.code == sf::Keyboard::R) {
+                game       = Game();
+                last_ai_ms = -1.0;
+                move_number = 0;
+                std::cout << "=== Game Start ===\n";
+            }
 
-            // Left-click: attempt to place a stone at the nearest intersection.
+            // Left-click: only accepted on Black's turn — White is AI-controlled.
+            // This prevents the human from accidentally placing White's stone
+            // in the brief window between Black placing and the AI responding.
             if (event.type == sf::Event::MouseButtonPressed &&
-                event.mouseButton.button == sf::Mouse::Left) {
+                event.mouseButton.button == sf::Mouse::Left &&
+                game.currentPlayer() == Player::Black) {
 
                 int row, col;
                 bool on_board = screenToBoard(
@@ -146,34 +182,61 @@ int main() {
                 );
 
                 if (on_board) {
-                    // placeStone enforces: in-bounds, cell empty, game ongoing.
-                    // It returns false silently — no crash, no feedback yet.
-                    // Phase 10 will add a visual rejection indicator.
-                    game.placeStone(row, col);
+                    int b_before = game.captureCount(Player::Black);
+                    bool placed  = game.placeStone(row, col);
+                    if (placed) {
+                        int caps = game.captureCount(Player::Black) - b_before;
+                        logMove(++move_number, "Black", row, col, caps, -1.0);
+                        if (game.state() == GameState::BlackWins)
+                            std::cout << "=== Black wins! ===\n";
+                    }
                 }
             }
         }
 
-        // Update window title to reflect game state.
-        // Capture counts are always shown so players can track progress toward the
-        // 10-stone capture win without needing extra UI elements.
+        // Update title and render BEFORE the AI thinks.
+        // This way the human's stone appears on screen immediately after the click;
+        // the window then freezes briefly during AI computation, and the AI stone
+        // appears in the next frame. Without this ordering both stones would appear
+        // together after the full AI delay, making the input feel broken.
         std::string title = "Gomoku — ";
         switch (game.state()) {
             case GameState::BlackWins: title += "Black wins!  (R to restart)"; break;
             case GameState::WhiteWins: title += "White wins!  (R to restart)"; break;
             case GameState::Ongoing:
                 title += (game.currentPlayer() == Player::Black)
-                             ? "Black's turn" : "White's turn";
+                             ? "Black's turn" : "White's turn (thinking...)";
                 break;
         }
         title += "   [B captures: " + std::to_string(game.captureCount(Player::Black))
                + "  W captures: "  + std::to_string(game.captureCount(Player::White)) + "]";
+
+        // Show AI think time once the AI has played at least once.
+        if (last_ai_ms >= 0.0)
+            title += "   AI: " + std::to_string(static_cast<int>(last_ai_ms)) + "ms";
+
         window.setTitle(title);
 
         window.clear();
         drawBoard(window);
         drawStones(window, game.board());
         window.display();
+
+        // AI computes AFTER the frame is displayed so the human's stone is visible
+        // before any freeze. The resulting AI stone will appear in the next frame.
+        if (game.state() == GameState::Ongoing &&
+            game.currentPlayer() == Player::White) {
+            Move m = ai.bestMove(game, last_ai_ms);
+            if (m.row >= 0) {
+                int w_before  = game.captureCount(Player::White);
+                MoveRecord rec = game.applyMove(m.row, m.col);
+                int caps = game.captureCount(Player::White) - w_before;
+                logMove(++move_number, "White (AI)", m.row, m.col, caps, last_ai_ms);
+                if (game.state() == GameState::WhiteWins)
+                    std::cout << "=== White wins! ===\n";
+                (void)rec; // record not needed here; applyMove already applied
+            }
+        }
     }
 
     return 0;

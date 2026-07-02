@@ -50,6 +50,12 @@ public:
 
     // ── AI-facing interface ───────────────────────────────────────────────────
 
+    // Returns true if placing the current player's stone at (row, col) is legal.
+    // Performs the same checks as placeStone() (bounds, occupied, double-three)
+    // without modifying game state. The AI calls this to filter its candidates
+    // before calling applyMove(), keeping validation out of the hot search path.
+    bool isLegalMove(int row, int col);
+
     // Apply a move with no validation — the AI only generates legal moves so
     // the guards in placeStone() would just add overhead in the search tree.
     // Returns a MoveRecord that can be passed to undoMove() to reverse everything.
