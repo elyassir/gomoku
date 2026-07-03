@@ -4,6 +4,21 @@
 #include <limits>
 #include <algorithm>
 
+// ── Exception-safe move guard ─────────────────────────────────────────────────
+
+// Applies a move on construction and undoes it on destruction.
+// Using RAII here guarantees undoMove is called even if an exception (e.g.
+// std::bad_alloc from a vector resize) fires between apply and undo — which
+// would otherwise leave the game in a corrupted state.
+struct ScopedMove {
+    Game&      game;
+    MoveRecord rec;
+    ScopedMove(Game& g, int row, int col) : game(g), rec(g.applyMove(row, col)) {}
+    ~ScopedMove() { game.undoMove(rec); }
+    ScopedMove(const ScopedMove&)            = delete;
+    ScopedMove& operator=(const ScopedMove&) = delete;
+};
+
 // ── Candidate generation ──────────────────────────────────────────────────────
 
 // Why no isLegalMove here?
@@ -167,9 +182,8 @@ std::vector<SM> AI::orderMoves(
     std::vector<SM> out;
     out.reserve(moves.size());
     for (const Move& m : moves) {
-        MoveRecord rec = game.applyMove(m.row, m.col);
+        ScopedMove guard(game, m.row, m.col);
         out.push_back({evaluate(game), m});
-        game.undoMove(rec);
     }
     if (want_high)
         std::sort(out.begin(), out.end(),
@@ -226,10 +240,10 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
     if (is_maximizing) {
         int best = std::numeric_limits<int>::min();
         for (const SM& sm : ordered) {
-            MoveRecord rec = game.applyMove(sm.second.row, sm.second.col);
+            ScopedMove guard(game, sm.second.row, sm.second.col);
             int s = minimax(game, depth - 1, false, alpha, beta);
-            game.undoMove(rec);
-            if (_time_up) return 0; // result is garbage — abort immediately
+            // guard destructor calls undoMove here — even on early return below
+            if (_time_up) return 0;
             if (s > best) best = s;
             if (best > alpha) alpha = best;
             if (alpha >= beta) break; // β-cutoff: minimiser won't allow this path
@@ -238,10 +252,10 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
     } else {
         int best = std::numeric_limits<int>::max();
         for (const SM& sm : ordered) {
-            MoveRecord rec = game.applyMove(sm.second.row, sm.second.col);
+            ScopedMove guard(game, sm.second.row, sm.second.col);
             int s = minimax(game, depth - 1, true, alpha, beta);
-            game.undoMove(rec);
-            if (_time_up) return 0; // result is garbage — abort immediately
+            // guard destructor calls undoMove here — even on early return below
+            if (_time_up) return 0;
             if (s < best) best = s;
             if (best < beta) beta = best;
             if (alpha >= beta) break; // α-cutoff: maximiser won't allow this path
@@ -304,9 +318,9 @@ Move AI::bestMove(Game& game, double& elapsed_ms, int& reached_depth) {
             if (_time_up) break;
 
             const Move& m   = sm.second;
-            MoveRecord  rec = game.applyMove(m.row, m.col);
+            ScopedMove  guard(game, m.row, m.col);
             int score       = minimax(game, depth - 1, !ai_maximizes, alpha, beta);
-            game.undoMove(rec);
+            // guard destructor calls undoMove when this loop body exits
 
             if (_time_up) break; // partial result — discard
 

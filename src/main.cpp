@@ -324,6 +324,7 @@ static void logMove(int move_num, const char* player, int row, int col,
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 int main() {
+  try {
     sf::Font font;
     bool font_ok = font.loadFromFile(FONT_PATH);
     if (!font_ok)
@@ -388,10 +389,13 @@ int main() {
                 } else {
                     double hint_ms; int hint_depth;
                     hint_move = ai.bestMove(game, hint_ms, hint_depth);
-                    std::cout << "[Hint] "
-                              << toNotation(hint_move.row, hint_move.col)
-                              << "  depth=" << hint_depth
-                              << "  " << static_cast<int>(hint_ms) << "ms\n";
+                    if (hint_move.row >= 0)
+                        std::cout << "[Hint] "
+                                  << toNotation(hint_move.row, hint_move.col)
+                                  << "  depth=" << hint_depth
+                                  << "  " << static_cast<int>(hint_ms) << "ms\n";
+                    else
+                        std::cout << "[Hint] no moves available\n";
                 }
             }
 
@@ -456,4 +460,15 @@ int main() {
     }
 
     return 0;
+
+  } catch (const std::bad_alloc&) {
+      std::cerr << "[Fatal] out of memory\n";
+      return 1;
+  } catch (const std::exception& e) {
+      std::cerr << "[Fatal] " << e.what() << "\n";
+      return 1;
+  } catch (...) {
+      std::cerr << "[Fatal] unknown exception\n";
+      return 1;
+  }
 }
