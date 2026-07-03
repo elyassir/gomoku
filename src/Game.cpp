@@ -11,18 +11,18 @@ Game::Game()
 
 // ── Human-facing move entry point ────────────────────────────────────────────
 
-bool Game::placeStone(int row, int col) {
+std::optional<MoveRecord> Game::placeStone(int row, int col) {
     // Guard 1: coordinates must be inside the 19x19 grid.
     if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE)
-        return false;
+        return std::nullopt;
 
     // Guard 2: the cell must be empty.
     if (_board.get(row, col) != Cell::Empty)
-        return false;
+        return std::nullopt;
 
     // Guard 3: no moves after the game is decided.
     if (_state != GameState::Ongoing)
-        return false;
+        return std::nullopt;
 
     Cell stone = (_current_player == Player::Black) ? Cell::Black : Cell::White;
 
@@ -39,12 +39,11 @@ bool Game::placeStone(int row, int col) {
         _board.set(row, col, Cell::Empty); // restore before applyMove places it for real
 
         if (is_double_three)
-            return false;
+            return std::nullopt;
     }
 
     // All checks passed — applyMove handles placement, captures, win detection, turn.
-    applyMove(row, col);
-    return true;
+    return applyMove(row, col);
 }
 
 // ── AI-facing interface ───────────────────────────────────────────────────────

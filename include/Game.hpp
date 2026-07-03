@@ -1,6 +1,7 @@
 #pragma once
 #include "Board.hpp"
 #include <array>
+#include <optional>
 
 // Which player is acting or has won.
 // Black always moves first in Gomoku.
@@ -44,9 +45,8 @@ public:
     // ── Human-facing interface ────────────────────────────────────────────────
 
     // Validate then apply a move for the current player at (row, col).
-    // Returns true  → move was legal, stone placed, captures processed, turn advanced.
-    // Returns false → move was illegal (out of bounds, occupied, game over).
-    bool placeStone(int row, int col);
+    // Returns the MoveRecord on success (enables undo), or nullopt if illegal.
+    std::optional<MoveRecord> placeStone(int row, int col);
 
     // ── AI-facing interface ───────────────────────────────────────────────────
 
