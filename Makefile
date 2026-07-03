@@ -1,8 +1,8 @@
 NAME     = Gomoku
 
 CXX      = c++
-CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -I/home/yoyahya/goinfre/sfml/include -O3 -march=native
-LDFLAGS  = -L/home/yoyahya/goinfre/sfml/lib -lsfml-graphics -lsfml-window -lsfml-system
+CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -I/home/$(USER)/goinfre/sfml/include -O3 -march=native
+LDFLAGS  = -L/home/$(USER)/goinfre/sfml/lib -lsfml-graphics -lsfml-window -lsfml-system
 
 SRC_DIR  = src
 OBJ_DIR  = obj
