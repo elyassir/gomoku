@@ -114,13 +114,29 @@ static void drawStones(sf::RenderWindow& window, const Board& board) {
     }
 }
 
+// ── Hint overlay ──────────────────────────────────────────────────────────────
+
+// Draw a green ring at the AI-suggested intersection (hint_move).
+// Drawn after stones so it sits on top. Hints are only suggested for empty
+// cells, so overlapping a stone shouldn't normally happen.
+static void drawHint(sf::RenderWindow& window, const Move& hint) {
+    if (hint.row < 0) return;
+    float r = STONE_RADIUS * 0.92f;
+    sf::CircleShape ring(r);
+    ring.setOrigin(r, r);
+    ring.setPosition(boardToScreen(hint.row, hint.col));
+    ring.setFillColor(sf::Color(0, 200, 80, 90));  // semi-transparent green fill
+    ring.setOutlineColor(sf::Color(0, 230, 90));
+    ring.setOutlineThickness(2.5f);
+    window.draw(ring);
+}
+
 // ── HUD panel ─────────────────────────────────────────────────────────────────
 
-// Draw the info strip below the board: turn status, capture counts, AI timer.
-// All game-state text lives here rather than in the title bar so it's always
-// visible and clearly legible during a defense.
+// Draw the info strip below the board: turn status, capture counts, AI timer,
+// and hint status. All game-state text lives here rather than in the title bar.
 static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
-                    const Game& game, double ai_ms, int ai_depth)
+                    const Game& game, double ai_ms, int ai_depth, const Move& hint)
 {
     // Dark wood panel backing the HUD.
     sf::RectangleShape panel({(float)WINDOW_SIZE, (float)PANEL_HEIGHT});
@@ -180,6 +196,28 @@ static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
         t_ai.setPosition((float)WINDOW_SIZE - tw - 15.f, (float)WINDOW_SIZE + 12.f);
         window.draw(t_ai);
     }
+
+    // ── Hint status (bottom-right) — only visible on Black's turn ─────────────
+    // Shows "H = hint" as a keyboard reminder, or "Hint: XN" when active.
+    if (game.state() == GameState::Ongoing &&
+        game.currentPlayer() == Player::Black) {
+        std::string hint_str;
+        sf::Color   hint_col;
+        if (hint.row >= 0) {
+            hint_str = "Hint: " +
+                std::string(1, static_cast<char>('A' + hint.col)) +
+                std::to_string(hint.row + 1);
+            hint_col = sf::Color(0, 220, 80);
+        } else {
+            hint_str = "H = hint";
+            hint_col = sf::Color(110, 110, 110);
+        }
+        sf::Text t_hint(hint_str, font, 14);
+        t_hint.setFillColor(hint_col);
+        float tw = t_hint.getLocalBounds().width;
+        t_hint.setPosition((float)WINDOW_SIZE - tw - 15.f, (float)WINDOW_SIZE + 46.f);
+        window.draw(t_hint);
+    }
 }
 
 // ── Move logger ───────────────────────────────────────────────────────────────
@@ -224,6 +262,7 @@ int main() {
     double last_ai_ms  = -1.0;
     int    last_depth  = 0;
     int    move_number = 0;
+    Move   hint_move   = {-1, -1}; // AI-suggested cell for Black; {-1,-1} = none
 
     std::cout << "=== Game Start ===\n";
 
@@ -246,7 +285,27 @@ int main() {
                 last_ai_ms  = -1.0;
                 last_depth  = 0;
                 move_number = 0;
+                hint_move   = {-1, -1};
                 std::cout << "=== Game Start ===\n";
+            }
+
+            // 'H': compute and show an AI hint for Black (the human player).
+            // bestMove() called on Black's turn returns the move the AI would
+            // play — we reuse it as a suggestion. Press H again to clear it.
+            if (event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::H &&
+                game.state() == GameState::Ongoing &&
+                game.currentPlayer() == Player::Black) {
+                if (hint_move.row >= 0) {
+                    hint_move = {-1, -1}; // toggle off
+                } else {
+                    double hint_ms; int hint_depth;
+                    hint_move = ai.bestMove(game, hint_ms, hint_depth);
+                    std::cout << "[Hint] "
+                              << toNotation(hint_move.row, hint_move.col)
+                              << "  depth=" << hint_depth
+                              << "  " << static_cast<int>(hint_ms) << "ms\n";
+                }
             }
 
             // Left-click: only accepted on Black's turn — White is AI-controlled.
@@ -267,6 +326,7 @@ int main() {
                     int b_before = game.captureCount(Player::Black);
                     bool placed  = game.placeStone(row, col);
                     if (placed) {
+                        hint_move = {-1, -1}; // board changed — hint is stale
                         int caps = game.captureCount(Player::Black) - b_before;
                         logMove(++move_number, "Black", row, col, caps, -1.0);
                         if (game.state() == GameState::BlackWins)
@@ -283,8 +343,9 @@ int main() {
         window.clear();
         drawBoard(window);
         drawStones(window, game.board());
+        drawHint(window, hint_move);
         if (font_ok)
-            drawHUD(window, font, game, last_ai_ms, last_depth);
+            drawHUD(window, font, game, last_ai_ms, last_depth, hint_move);
         window.display();
 
         // AI computes AFTER the frame is displayed so the human's stone is visible
@@ -293,6 +354,7 @@ int main() {
             game.currentPlayer() == Player::White) {
             Move m = ai.bestMove(game, last_ai_ms, last_depth);
             if (m.row >= 0) {
+                hint_move = {-1, -1}; // board will change — discard stale hint
                 int w_before  = game.captureCount(Player::White);
                 MoveRecord rec = game.applyMove(m.row, m.col);
                 int caps = game.captureCount(Player::White) - w_before;
