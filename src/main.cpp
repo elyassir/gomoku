@@ -3,8 +3,8 @@
 #include <string>    // window title construction
 #include <iostream>  // move log
 #include <iomanip>   // std::setw
-#include "Game.hpp"
-#include "AI.hpp"
+#include "../include/Game.hpp"
+#include "../include/AI.hpp"
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 static constexpr int   WINDOW_SIZE = 700;

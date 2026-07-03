@@ -1,4 +1,4 @@
-#include "Game.hpp"
+#include "../include/Game.hpp"
 
 // Member-initialiser list constructs each field directly.
 Game::Game()

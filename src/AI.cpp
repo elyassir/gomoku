@@ -1,4 +1,4 @@
-#include "AI.hpp"
+#include "../include/AI.hpp"
 #include <chrono>
 #include <limits>
 #include <algorithm>

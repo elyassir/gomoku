@@ -1,4 +1,4 @@
-#include "Board.hpp"
+#include "../include/Board.hpp"
 
 // Delegate construction to reset() so there is exactly one place
 // that defines what "empty board" means.
