@@ -85,51 +85,15 @@ private:
     // Does NOT count the origin — callers add 1 for the placed stone.
     int countInDirection(int row, int col, int delta_row, int delta_col, Cell stone) const;
 
-    // Scan all 4 axes through the placed stone; set _state to a win if 5+ align
-    // AND the opponent cannot immediately break the line by capturing from it.
+    // Scan all 4 axes through the placed stone; set _state to a win if 5+ align.
     void checkAlignment(int row, int col, Cell stone);
-
-    // Returns true if the opponent has a legal capture move that removes at least
-    // one stone from the winning line along axis (dr, dc) through (row, col).
-    // Used by checkAlignment: if the line is breakable, it is not yet a win.
-    bool isAlignmentBreakable(int row, int col, Cell stone, int dr, int dc) const;
 
     // Scan all 8 directions for the pattern Me Opp Opp Me.
     // Remove any matching pairs, update capture counters, and record pairs in `record`.
     // Only fires for the player who moved (captures are never triggered by the mover
-    // placing a stone into a flanked position — see Phase 3 explanation).
+    // placing a stone into a flanked position).
     void processCaptures(int row, int col, Cell stone, MoveRecord& record);
 
     // Set _state to a capture win if either player has reached 10 captured stones.
     void checkCaptureWin();
-
-    // ── Double-three helpers (Phase 4) ────────────────────────────────────────
-
-    // Returns true if placing `stone` at (row, col) would immediately trigger
-    // at least one capture in any direction (Me Opp Opp Me pattern).
-    // Used to apply the capture exception to the double-three rule:
-    // a move that captures is legal even if it simultaneously creates a double-three.
-    bool wouldCapture(int row, int col, Cell stone) const;
-
-    // Returns true if, with `stone` already placed at (row, col), that axis
-    // contains a free-three through (row, col).
-    //
-    // A free-three is a set of exactly 3 same-color stones that can become an
-    // OPEN FOUR — i.e., _ X X X X _ — in exactly one move (the gap cell).
-    // The placed stone must be one of the 3 existing stones, not the gap.
-    //
-    // The 4 patterns (6-cell window where window[0] and window[5] are the open flanks):
-    //   _ _ X X X _   (gap at window[1], stones at 2,3,4)
-    //   _ X _ X X _   (gap at window[2], stones at 1,3,4)
-    //   _ X X _ X _   (gap at window[3], stones at 1,2,4)
-    //   _ X X X _ _   (gap at window[4], stones at 1,2,3)
-    //
-    // NOTE: this must be called with `stone` already on the board at (row, col)
-    // so that the board state reflects the move being evaluated.
-    bool hasFreeThreeOnAxis(int row, int col, int dr, int dc, Cell stone) const;
-
-    // Returns true if the stone placed at (row, col) participates in a free-three
-    // on 2 or more distinct axes simultaneously — the double-three condition.
-    // Must be called with `stone` already on the board at (row, col).
-    bool wouldCreateDoubleThree(int row, int col, Cell stone) const;
 };
