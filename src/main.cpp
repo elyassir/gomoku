@@ -217,7 +217,8 @@ static void drawDebug(sf::RenderWindow& window, const sf::Font& font,
 // Draw the info strip below the board: turn status, capture counts, AI timer,
 // and hint status. All game-state text lives here rather than in the title bar.
 static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
-                    const Game& game, double ai_ms, int ai_depth, const Move& hint)
+                    const Game& game, double ai_ms, int ai_depth,
+                    const Move& hint, bool hotseat_mode)
 {
     // Dark wood panel backing the HUD.
     sf::RectangleShape panel({(float)WINDOW_SIZE, (float)PANEL_HEIGHT});
@@ -244,9 +245,11 @@ static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
             status_col = sf::Color(230, 230, 230);
             break;
         case GameState::Ongoing:
-            status = (game.currentPlayer() == Player::Black)
-                         ? "Black's turn"
-                         : "White thinking...";
+            if (game.currentPlayer() == Player::Black)
+                status = "Black's turn";
+            else
+                // In hotseat both players are human; in AI mode White is thinking.
+                status = hotseat_mode ? "White's turn" : "White thinking...";
             break;
     }
     sf::Text t_turn(status, font, 16);
@@ -265,23 +268,31 @@ static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
     t_cap.setPosition(15.f, (float)WINDOW_SIZE + 46.f);
     window.draw(t_cap);
 
-    // ── AI timer + depth (top-right) — shown once the AI has played ──────────
-    if (ai_ms >= 0.0) {
+    // ── Top-right: mode indicator (hotseat) or AI timer (vs AI) ──────────────
+    if (hotseat_mode) {
+        // Show the current mode so the player knows Tab switches back.
+        std::string mode_str = "Hotseat   Tab: vs AI";
+        sf::Text t_mode(mode_str, font, 14);
+        t_mode.setFillColor(sf::Color(100, 200, 255));
+        float tw = t_mode.getLocalBounds().width;
+        t_mode.setPosition((float)WINDOW_SIZE - tw - 15.f, (float)WINDOW_SIZE + 12.f);
+        window.draw(t_mode);
+    } else if (ai_ms >= 0.0) {
         std::string ai_str =
             "AI   " + std::to_string(static_cast<int>(ai_ms)) +
             "ms   depth " + std::to_string(ai_depth);
         sf::Text t_ai(ai_str, font, 16);
-        t_ai.setFillColor(sf::Color(220, 180, 60)); // gold to draw the eye
-        // Right-align: shift so the right edge sits 15px from the window edge.
+        t_ai.setFillColor(sf::Color(220, 180, 60));
         float tw = t_ai.getLocalBounds().width;
         t_ai.setPosition((float)WINDOW_SIZE - tw - 15.f, (float)WINDOW_SIZE + 12.f);
         window.draw(t_ai);
     }
 
-    // ── Hint status (bottom-right) — only visible on Black's turn ─────────────
-    // Shows "H = hint" as a keyboard reminder, or "Hint: XN" when active.
-    if (game.state() == GameState::Ongoing &&
-        game.currentPlayer() == Player::Black) {
+    // ── Hint status (bottom-right) ────────────────────────────────────────────
+    // In AI mode show only on Black's turn; in hotseat show on either player's turn.
+    bool show_hint_ui = game.state() == GameState::Ongoing &&
+                        (hotseat_mode || game.currentPlayer() == Player::Black);
+    if (show_hint_ui) {
         std::string hint_str;
         sf::Color   hint_col;
         if (hint.row >= 0) {
@@ -344,8 +355,9 @@ int main() {
     double last_ai_ms  = -1.0;
     int    last_depth  = 0;
     int    move_number = 0;
-    Move   hint_move   = {-1, -1}; // AI-suggested cell for Black; {-1,-1} = none
+    Move   hint_move   = {-1, -1}; // AI-suggested cell for current player; {-1,-1} = none
     bool   show_debug  = false;    // D key toggles the AI reasoning panel
+    bool   hotseat_mode = false;   // Tab toggles: true = both players are human
 
     std::cout << "=== Game Start ===\n";
 
@@ -377,13 +389,20 @@ int main() {
                 event.key.code == sf::Keyboard::D)
                 show_debug = !show_debug;
 
-            // 'H': compute and show an AI hint for Black (the human player).
-            // bestMove() called on Black's turn returns the move the AI would
-            // play — we reuse it as a suggestion. Press H again to clear it.
+            // Tab: toggle between vs-AI and hotseat (both-human) mode.
+            if (event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::Tab) {
+                hotseat_mode = !hotseat_mode;
+                hint_move    = {-1, -1}; // hint is mode-specific — discard
+                std::cout << (hotseat_mode ? "[Mode] Hotseat\n" : "[Mode] vs AI\n");
+            }
+
+            // 'H': compute and show an AI hint for the current player.
+            // In hotseat mode H works for both Black and White; in AI mode only Black.
             if (event.type == sf::Event::KeyPressed &&
                 event.key.code == sf::Keyboard::H &&
                 game.state() == GameState::Ongoing &&
-                game.currentPlayer() == Player::Black) {
+                (hotseat_mode || game.currentPlayer() == Player::Black)) {
                 if (hint_move.row >= 0) {
                     hint_move = {-1, -1}; // toggle off
                 } else {
@@ -399,12 +418,16 @@ int main() {
                 }
             }
 
-            // Left-click: only accepted on Black's turn — White is AI-controlled.
-            // This prevents the human from accidentally placing White's stone
-            // in the brief window between Black placing and the AI responding.
+            // Left-click: accepted for Black always; for White only in hotseat mode.
+            // In AI mode, rejecting White clicks prevents accidental placements during
+            // the brief gap between Black's move and the AI's response.
+            bool human_turn = game.state() == GameState::Ongoing &&
+                              (game.currentPlayer() == Player::Black ||
+                               (hotseat_mode && game.currentPlayer() == Player::White));
+
             if (event.type == sf::Event::MouseButtonPressed &&
                 event.mouseButton.button == sf::Mouse::Left &&
-                game.currentPlayer() == Player::Black) {
+                human_turn) {
 
                 int row, col;
                 bool on_board = screenToBoard(
@@ -414,14 +437,18 @@ int main() {
                 );
 
                 if (on_board) {
-                    int b_before = game.captureCount(Player::Black);
-                    bool placed  = game.placeStone(row, col);
+                    Player cur    = game.currentPlayer();
+                    int caps_before = game.captureCount(cur);
+                    bool placed   = game.placeStone(row, col);
                     if (placed) {
                         hint_move = {-1, -1}; // board changed — hint is stale
-                        int caps = game.captureCount(Player::Black) - b_before;
-                        logMove(++move_number, "Black", row, col, caps, -1.0);
+                        int caps  = game.captureCount(cur) - caps_before;
+                        const char* name = (cur == Player::Black) ? "Black" : "White";
+                        logMove(++move_number, name, row, col, caps, -1.0);
                         if (game.state() == GameState::BlackWins)
                             std::cout << "=== Black wins! ===\n";
+                        else if (game.state() == GameState::WhiteWins)
+                            std::cout << "=== White wins! ===\n";
                     }
                 }
             }
@@ -438,12 +465,13 @@ int main() {
         if (font_ok && show_debug)
             drawDebug(window, font, ai.debugMoves(), last_depth);
         if (font_ok)
-            drawHUD(window, font, game, last_ai_ms, last_depth, hint_move);
+            drawHUD(window, font, game, last_ai_ms, last_depth, hint_move, hotseat_mode);
         window.display();
 
         // AI computes AFTER the frame is displayed so the human's stone is visible
-        // before any freeze. The resulting AI stone will appear in the next frame.
-        if (game.state() == GameState::Ongoing &&
+        // before any freeze. Skipped entirely in hotseat mode — both players are human.
+        if (!hotseat_mode &&
+            game.state() == GameState::Ongoing &&
             game.currentPlayer() == Player::White) {
             Move m = ai.bestMove(game, last_ai_ms, last_depth);
             if (m.row >= 0) {
