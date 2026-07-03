@@ -10,9 +10,15 @@ struct Move {
 
 class AI {
 public:
+    // time_ms: hard wall on per-move think time (default 500ms).
+    // max_depth: iterative deepening never exceeds this (default 10).
+    // Easy difficulty: AI(150, 3).  Pro: AI(500, 10).
+    explicit AI(int time_ms = 500, int max_depth = 10)
+        : _time_limit_ms(time_ms), _max_depth(max_depth) {}
+
     // Find the best legal move for the current player using iterative deepening.
-    // Searches depth 1, 2, 3, … until the 500ms budget is exhausted, then
-    // returns the best move from the last *complete* depth.
+    // Searches depth 1, 2, 3, … until the budget is exhausted, then returns the
+    // best move from the last *complete* depth.
     // Writes the actual think time (ms) to elapsed_ms and the depth reached to reached_depth.
     Move bestMove(Game& game, double& elapsed_ms, int& reached_depth);
 
@@ -21,10 +27,10 @@ public:
     const std::vector<std::pair<int,Move>>& debugMoves() const { return _debug_moves; }
 
 private:
-    // Hard wall on per-move think time.
-    static constexpr int TIME_LIMIT_MS  = 500;
-    // Iterative deepening will never exceed this depth.
-    static constexpr int MAX_DEPTH      = 10;
+    // Per-move time budget and search depth ceiling — set by constructor.
+    int _time_limit_ms;
+    int _max_depth;
+
     // Max candidates explored per node after ordering. Without a cap, ordering
     // evaluates ~50 candidates × 50^(d-1) nodes = ordering cost ≈ full search cost.
     // Capping at 15 reduces the per-node multiplier to 15^(d-1).

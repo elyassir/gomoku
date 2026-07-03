@@ -1,8 +1,10 @@
 #include <SFML/Graphics.hpp>
-#include <cmath>     // std::round
-#include <string>    // window title construction
-#include <iostream>  // move log
-#include <iomanip>   // std::setw
+#include <cmath>
+#include <string>
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+#include <optional>
 #include "../include/Game.hpp"
 #include "../include/AI.hpp"
 
@@ -169,11 +171,9 @@ static void drawDebug(sf::RenderWindow& window, const sf::Font& font,
     }
 
     // ── Score panel — floating box in the top-right corner of the board ───────
-    // Inline notation helper (toNotation is defined later in the file).
     auto notation = [](int row, int col) {
         return std::string(1, static_cast<char>('A' + col)) + std::to_string(row + 1);
     };
-    // Format a minimax score for human reading.
     auto fmt_score = [](int s) -> std::string {
         if (s >=  900'000) return "WIN";
         if (s <= -900'000) return "LOSE";
@@ -192,20 +192,18 @@ static void drawDebug(sf::RenderWindow& window, const sf::Font& font,
     box.setOutlineThickness(1.f);
     window.draw(box);
 
-    // Header row
     sf::Text header("AI DEBUG   depth " + std::to_string(reached_depth), font, 12);
     header.setFillColor(sf::Color(130, 130, 130));
     header.setPosition(box_x + 7.f, box_y + 5.f);
     window.draw(header);
 
-    // One row per candidate
     for (int i = 0; i < n; ++i) {
         int score      = moves[i].first;
         const Move& m  = moves[i].second;
         std::string line = std::to_string(i + 1) + ".  " +
                            notation(m.row, m.col) + "   " + fmt_score(score);
         sf::Text t(line, font, 13);
-        t.setFillColor(i == 0 ? sf::Color(220, 180, 60)   // best → gold
+        t.setFillColor(i == 0 ? sf::Color(220, 180, 60)
                                : sf::Color(200, 200, 200));
         t.setPosition(box_x + 7.f, box_y + 24.f + i * row_h);
         window.draw(t);
@@ -215,10 +213,11 @@ static void drawDebug(sf::RenderWindow& window, const sf::Font& font,
 // ── HUD panel ─────────────────────────────────────────────────────────────────
 
 // Draw the info strip below the board: turn status, capture counts, AI timer,
-// and hint status. All game-state text lives here rather than in the title bar.
+// and hint status. human_player tells us which color the human controls so we
+// can label AI turns as "thinking..." regardless of which color the AI plays.
 static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
                     const Game& game, double ai_ms, int ai_depth,
-                    const Move& hint, bool hotseat_mode)
+                    const Move& hint, bool hotseat_mode, Player human_player)
 {
     // Dark wood panel backing the HUD.
     sf::RectangleShape panel({(float)WINDOW_SIZE, (float)PANEL_HEIGHT});
@@ -244,13 +243,13 @@ static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
             status     = "White wins!   R to restart";
             status_col = sf::Color(230, 230, 230);
             break;
-        case GameState::Ongoing:
-            if (game.currentPlayer() == Player::Black)
-                status = "Black's turn";
-            else
-                // In hotseat both players are human; in AI mode White is thinking.
-                status = hotseat_mode ? "White's turn" : "White thinking...";
+        case GameState::Ongoing: {
+            bool is_human_turn = hotseat_mode ||
+                                 (game.currentPlayer() == human_player);
+            const char* color = (game.currentPlayer() == Player::Black) ? "Black" : "White";
+            status = std::string(color) + (is_human_turn ? "'s turn" : " thinking...");
             break;
+        }
     }
     sf::Text t_turn(status, font, 16);
     t_turn.setFillColor(status_col);
@@ -270,7 +269,6 @@ static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
 
     // ── Top-right: mode indicator (hotseat) or AI timer (vs AI) ──────────────
     if (hotseat_mode) {
-        // Show the current mode so the player knows Tab switches back.
         std::string mode_str = "Hotseat   Tab: vs AI";
         sf::Text t_mode(mode_str, font, 14);
         t_mode.setFillColor(sf::Color(100, 200, 255));
@@ -289,9 +287,10 @@ static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
     }
 
     // ── Hint status (bottom-right) ────────────────────────────────────────────
-    // In AI mode show only on Black's turn; in hotseat show on either player's turn.
+    // Show hint UI whenever it's the human's turn (both players in hotseat,
+    // only the chosen color in AI mode).
     bool show_hint_ui = game.state() == GameState::Ongoing &&
-                        (hotseat_mode || game.currentPlayer() == Player::Black);
+                        (hotseat_mode || game.currentPlayer() == human_player);
     if (show_hint_ui) {
         std::string hint_str;
         sf::Color   hint_col;
@@ -312,6 +311,40 @@ static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
     }
 }
 
+// ── Setup / lobby overlay ─────────────────────────────────────────────────────
+
+// Semi-transparent overlay drawn on top of the empty board while the player
+// chooses color (phase 0) and difficulty (phase 1).
+static void drawSetup(sf::RenderWindow& window, const sf::Font& font,
+                      int phase, Player chosen_color)
+{
+    // Dark overlay so the board doesn't distract from the menu text.
+    sf::RectangleShape overlay({(float)WINDOW_SIZE, (float)WINDOW_SIZE});
+    overlay.setFillColor(sf::Color(0, 0, 0, 170));
+    window.draw(overlay);
+
+    // Helper: draw centered text at a given Y position.
+    auto label = [&](const std::string& text, float y, unsigned size, sf::Color col) {
+        sf::Text t(text, font, size);
+        t.setFillColor(col);
+        t.setPosition(((float)WINDOW_SIZE - t.getLocalBounds().width) / 2.f, y);
+        window.draw(t);
+    };
+
+    if (phase == 0) {
+        label("GOMOKU", 150.f, 32, sf::Color(220, 180, 60));
+        label("Choose your color", 215.f, 22, sf::Color(220, 220, 220));
+        label("B  =  Black   (you play first)", 270.f, 17, sf::Color(180, 180, 180));
+        label("W  =  White   (AI plays first)", 305.f, 17, sf::Color(180, 180, 180));
+    } else {
+        const char* color_name = (chosen_color == Player::Black) ? "Black" : "White";
+        label(std::string("Playing as ") + color_name, 165.f, 18, sf::Color(100, 200, 255));
+        label("Choose AI difficulty", 215.f, 22, sf::Color(220, 220, 220));
+        label("1  =  Easy   (quick, weaker AI)", 270.f, 17, sf::Color(180, 180, 180));
+        label("2  =  Pro    (500ms, depth 10)",   305.f, 17, sf::Color(180, 180, 180));
+    }
+}
+
 // ── Move logger ───────────────────────────────────────────────────────────────
 
 // Columns A–S (19 letters), rows 1–19 from the top — standard Gomoku notation.
@@ -319,18 +352,17 @@ static std::string toNotation(int row, int col) {
     return std::string(1, static_cast<char>('A' + col)) + std::to_string(row + 1);
 }
 
-static void logMove(int move_num, const char* player, int row, int col,
-                    int captures, double ai_ms) {
-    // std::left is sticky in std::cout — reset to std::right after each use
-    // so the move number stays right-aligned in subsequent calls.
-    std::cout << "[" << std::right << std::setw(2) << move_num << "] "
-              << std::left << std::setw(10) << player << std::right
-              << toNotation(row, col);
-    if (captures > 0)
-        std::cout << "  captures:" << captures;
-    if (ai_ms >= 0.0)
-        std::cout << "  " << static_cast<int>(ai_ms) << "ms";
-    std::cout << "\n";
+// Format a move as a log line (also used for the history recap on 'P').
+static std::string formatMove(int move_num, const char* player,
+                               int row, int col, int captures, double ai_ms)
+{
+    std::ostringstream oss;
+    oss << "[" << std::right << std::setw(2) << move_num << "] "
+        << std::left << std::setw(11) << player << std::right
+        << toNotation(row, col);
+    if (captures > 0) oss << "  captures:" << captures;
+    if (ai_ms >= 0.0) oss << "  " << static_cast<int>(ai_ms) << "ms";
+    return oss.str();
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -351,15 +383,34 @@ int main() {
     window.setFramerateLimit(60);
 
     Game   game;
-    AI     ai;
-    double last_ai_ms  = -1.0;
-    int    last_depth  = 0;
-    int    move_number = 0;
-    Move   hint_move   = {-1, -1}; // AI-suggested cell for current player; {-1,-1} = none
-    bool   show_debug  = false;    // D key toggles the AI reasoning panel
-    bool   hotseat_mode = false;   // Tab toggles: true = both players are human
+    AI     ai;          // default Pro params; reconfigured after difficulty choice
 
-    std::cout << "=== Game Start ===\n";
+    // ── Setup state (lobby before game starts) ────────────────────────────────
+    int    setup_phase  = 0;              // 0=pick color, 1=pick difficulty, 2=playing
+    Player human_player = Player::Black;  // confirmed in phase 0
+
+    // ── In-game state ─────────────────────────────────────────────────────────
+    bool   hotseat_mode = false;          // Tab toggles; both players human when true
+    double last_ai_ms   = -1.0;
+    int    last_depth   = 0;
+    int    move_number  = 0;
+    Move   hint_move    = {-1, -1};       // current player hint; {-1,-1} = none shown
+    bool   show_debug   = false;          // D key toggles AI reasoning panel
+
+    // ── Undo / history ────────────────────────────────────────────────────────
+    // Each entry keeps the MoveRecord (for undoMove) and a formatted string
+    // (for the 'P' history recap). Parallel to the sequence of permanent moves.
+    struct HistoryEntry { MoveRecord rec; std::string note; };
+    std::vector<HistoryEntry> history;
+
+    // Push a permanent move (human or AI) onto the history stack.
+    auto push_history = [&](const MoveRecord& rec, const std::string& note) {
+        history.push_back({rec, note});
+    };
+
+    std::cout << "=== Gomoku ===\n"
+              << "Controls: click=place  H=hint  D=debug  Z=undo  P=history"
+                 "  Tab=hotseat  R=restart\n";
 
     // ── Main loop ─────────────────────────────────────────────────────────────
     while (window.isOpen()) {
@@ -368,12 +419,45 @@ int main() {
 
             if (event.type == sf::Event::Closed)
                 window.close();
-
             if (event.type == sf::Event::KeyPressed &&
                 event.key.code == sf::Keyboard::Escape)
                 window.close();
 
-            // 'R' restarts the game from any state (mid-game or after a win).
+            // ── Lobby: color selection (phase 0) ──────────────────────────────
+            if (setup_phase == 0) {
+                if (event.type == sf::Event::KeyPressed) {
+                    if (event.key.code == sf::Keyboard::B) {
+                        human_player = Player::Black;
+                        setup_phase  = 1;
+                    } else if (event.key.code == sf::Keyboard::W) {
+                        human_player = Player::White;
+                        setup_phase  = 1;
+                    }
+                }
+                continue; // skip all game handlers while in lobby
+            }
+
+            // ── Lobby: difficulty selection (phase 1) ──────────────────────────
+            if (setup_phase == 1) {
+                if (event.type == sf::Event::KeyPressed) {
+                    if (event.key.code == sf::Keyboard::Num1) {
+                        ai = AI(150, 3);
+                        std::cout << "[Difficulty] Easy\n";
+                        setup_phase = 2;
+                        std::cout << "=== Game Start ===\n";
+                    } else if (event.key.code == sf::Keyboard::Num2) {
+                        ai = AI(500, 10);
+                        std::cout << "[Difficulty] Pro\n";
+                        setup_phase = 2;
+                        std::cout << "=== Game Start ===\n";
+                    }
+                }
+                continue;
+            }
+
+            // ── Game handlers (phase 2 only) ───────────────────────────────────
+
+            // 'R': restart the game with the same color and difficulty settings.
             if (event.type == sf::Event::KeyPressed &&
                 event.key.code == sf::Keyboard::R) {
                 game        = Game();
@@ -381,6 +465,7 @@ int main() {
                 last_depth  = 0;
                 move_number = 0;
                 hint_move   = {-1, -1};
+                history.clear();
                 std::cout << "=== Game Start ===\n";
             }
 
@@ -397,12 +482,12 @@ int main() {
                 std::cout << (hotseat_mode ? "[Mode] Hotseat\n" : "[Mode] vs AI\n");
             }
 
-            // 'H': compute and show an AI hint for the current player.
-            // In hotseat mode H works for both Black and White; in AI mode only Black.
+            // 'H': AI hint for the current player.
+            // In hotseat mode works for either player; in AI mode only for the human.
             if (event.type == sf::Event::KeyPressed &&
                 event.key.code == sf::Keyboard::H &&
                 game.state() == GameState::Ongoing &&
-                (hotseat_mode || game.currentPlayer() == Player::Black)) {
+                (hotseat_mode || game.currentPlayer() == human_player)) {
                 if (hint_move.row >= 0) {
                     hint_move = {-1, -1}; // toggle off
                 } else {
@@ -418,12 +503,37 @@ int main() {
                 }
             }
 
-            // Left-click: accepted for Black always; for White only in hotseat mode.
-            // In AI mode, rejecting White clicks prevents accidental placements during
-            // the brief gap between Black's move and the AI's response.
+            // 'Z': undo the last move(s).
+            // In hotseat, undo 1 move. In AI mode, undo 2 (AI response + human move)
+            // so the board returns to a state where the human can choose again.
+            // If fewer moves exist than requested, undo as many as available.
+            if (event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::Z) {
+                int want = (!hotseat_mode && (int)history.size() >= 2) ? 2 : 1;
+                int todo = std::min(want, (int)history.size());
+                for (int i = 0; i < todo; ++i) {
+                    game.undoMove(history.back().rec);
+                    std::cout << "[Undo] " << history.back().note << "\n";
+                    history.pop_back();
+                    --move_number;
+                }
+                if (todo > 0) hint_move = {-1, -1};
+            }
+
+            // 'P': print the full move history to the terminal (recap).
+            if (event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::P) {
+                std::cout << "=== History (" << history.size() << " moves) ===\n";
+                for (const auto& h : history)
+                    std::cout << h.note << "\n";
+                std::cout << "===\n";
+            }
+
+            // Left-click: accepted on the human's turn (or either player's turn in hotseat).
+            // In AI mode, rejecting the opponent's turn prevents accidental placements
+            // during the brief gap between a move and the AI's response.
             bool human_turn = game.state() == GameState::Ongoing &&
-                              (game.currentPlayer() == Player::Black ||
-                               (hotseat_mode && game.currentPlayer() == Player::White));
+                              (hotseat_mode || game.currentPlayer() == human_player);
 
             if (event.type == sf::Event::MouseButtonPressed &&
                 event.mouseButton.button == sf::Mouse::Left &&
@@ -437,14 +547,17 @@ int main() {
                 );
 
                 if (on_board) {
-                    Player cur    = game.currentPlayer();
+                    Player cur      = game.currentPlayer();
                     int caps_before = game.captureCount(cur);
-                    bool placed   = game.placeStone(row, col);
-                    if (placed) {
+                    auto rec        = game.placeStone(row, col);
+                    if (rec) {
                         hint_move = {-1, -1}; // board changed — hint is stale
                         int caps  = game.captureCount(cur) - caps_before;
                         const char* name = (cur == Player::Black) ? "Black" : "White";
-                        logMove(++move_number, name, row, col, caps, -1.0);
+                        ++move_number;
+                        std::string note = formatMove(move_number, name, row, col, caps, -1.0);
+                        std::cout << note << "\n";
+                        push_history(*rec, note);
                         if (game.state() == GameState::BlackWins)
                             std::cout << "=== Black wins! ===\n";
                         else if (game.state() == GameState::WhiteWins)
@@ -454,10 +567,11 @@ int main() {
             }
         }
 
-        // Render BEFORE the AI thinks so the human's stone appears immediately.
-        // The window freezes briefly during AI computation; the AI stone then
-        // appears in the next frame. Without this ordering both stones would appear
-        // together after the full AI delay, making the input feel broken.
+        // ── Render ────────────────────────────────────────────────────────────
+        // Board and stones are drawn before the AI thinks so the human's stone
+        // appears immediately; the AI stone arrives in the next frame after it
+        // finishes computing. Without this ordering both stones appear together
+        // after the full AI delay, making input feel broken.
         window.clear();
         drawBoard(window);
         drawStones(window, game.board());
@@ -465,24 +579,35 @@ int main() {
         if (font_ok && show_debug)
             drawDebug(window, font, ai.debugMoves(), last_depth);
         if (font_ok)
-            drawHUD(window, font, game, last_ai_ms, last_depth, hint_move, hotseat_mode);
+            drawHUD(window, font, game, last_ai_ms, last_depth,
+                    hint_move, hotseat_mode, human_player);
+        if (setup_phase < 2 && font_ok)
+            drawSetup(window, font, setup_phase, human_player);
         window.display();
 
-        // AI computes AFTER the frame is displayed so the human's stone is visible
-        // before any freeze. Skipped entirely in hotseat mode — both players are human.
-        if (!hotseat_mode &&
+        // ── AI move ───────────────────────────────────────────────────────────
+        // Only fires when: game is running, not in hotseat, it's the AI's turn.
+        if (setup_phase == 2 &&
+            !hotseat_mode &&
             game.state() == GameState::Ongoing &&
-            game.currentPlayer() == Player::White) {
+            game.currentPlayer() != human_player) {
+
             Move m = ai.bestMove(game, last_ai_ms, last_depth);
             if (m.row >= 0) {
-                hint_move = {-1, -1}; // board will change — discard stale hint
-                int w_before  = game.captureCount(Player::White);
-                MoveRecord rec = game.applyMove(m.row, m.col);
-                int caps = game.captureCount(Player::White) - w_before;
-                logMove(++move_number, "White (AI)", m.row, m.col, caps, last_ai_ms);
-                if (game.state() == GameState::WhiteWins)
+                hint_move   = {-1, -1};
+                Player cur  = game.currentPlayer();
+                int caps_before = game.captureCount(cur);
+                MoveRecord rec  = game.applyMove(m.row, m.col);
+                int caps    = game.captureCount(cur) - caps_before;
+                const char* ai_name = (cur == Player::Black) ? "Black (AI)" : "White (AI)";
+                ++move_number;
+                std::string note = formatMove(move_number, ai_name, m.row, m.col, caps, last_ai_ms);
+                std::cout << note << "\n";
+                push_history(rec, note);
+                if (game.state() == GameState::BlackWins)
+                    std::cout << "=== Black wins! ===\n";
+                else if (game.state() == GameState::WhiteWins)
                     std::cout << "=== White wins! ===\n";
-                (void)rec; // record not needed here; applyMove already applied
             }
         }
     }

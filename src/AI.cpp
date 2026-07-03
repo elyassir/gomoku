@@ -276,7 +276,7 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
 // cost of depth d alone, so the "wasted" shallower passes are negligible.
 Move AI::bestMove(Game& game, double& elapsed_ms, int& reached_depth) {
     auto t_start = std::chrono::steady_clock::now();
-    _deadline    = t_start + std::chrono::milliseconds(TIME_LIMIT_MS);
+    _deadline    = t_start + std::chrono::milliseconds(_time_limit_ms);
 
     // Generate candidates fast (no legality check), then filter with isLegalMove.
     // This is the only place we pay the double-three cost — once per move, for
@@ -296,7 +296,7 @@ Move AI::bestMove(Game& game, double& elapsed_ms, int& reached_depth) {
     Move best_move    = candidates[0]; // fallback: first legal move
     reached_depth     = 0;
 
-    for (int depth = 1; depth <= MAX_DEPTH; ++depth) {
+    for (int depth = 1; depth <= _max_depth; ++depth) {
         _time_up = false;
 
         int  best_score = ai_maximizes
