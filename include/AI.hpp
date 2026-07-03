@@ -16,6 +16,10 @@ public:
     // Writes the actual think time (ms) to elapsed_ms and the depth reached to reached_depth.
     Move bestMove(Game& game, double& elapsed_ms, int& reached_depth);
 
+    // Root candidates from the last complete depth, sorted best-first.
+    // Populated by bestMove so the UI can show the AI's top moves and scores.
+    const std::vector<std::pair<int,Move>>& debugMoves() const { return _debug_moves; }
+
 private:
     // Hard wall on per-move think time.
     static constexpr int TIME_LIMIT_MS  = 500;
@@ -30,6 +34,8 @@ private:
     std::chrono::steady_clock::time_point _deadline;
     // Flipped to true the first time a node exceeds _deadline; unwinds the whole tree.
     bool _time_up = false;
+    // Root candidates from the last complete depth — updated by bestMove.
+    std::vector<std::pair<int,Move>> _debug_moves;
 
     // Collect all empty cells within 2 cells of any existing stone.
     // No legality check — used inside the search tree where the double-three

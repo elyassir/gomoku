@@ -297,6 +297,9 @@ Move AI::bestMove(Game& game, double& elapsed_ms, int& reached_depth) {
         // orderMoves reads, so ordering improves with each deeper pass.
         std::vector<SM> ordered = orderMoves(game, candidates, ai_maximizes);
 
+        std::vector<SM> this_scores; // root scores for this depth
+        this_scores.reserve(ordered.size());
+
         for (const SM& sm : ordered) {
             if (_time_up) break;
 
@@ -306,6 +309,8 @@ Move AI::bestMove(Game& game, double& elapsed_ms, int& reached_depth) {
             game.undoMove(rec);
 
             if (_time_up) break; // partial result — discard
+
+            this_scores.push_back({score, m});
 
             bool is_better = ai_maximizes ? (score > best_score) : (score < best_score);
             if (is_better) {
@@ -320,6 +325,14 @@ Move AI::bestMove(Game& game, double& elapsed_ms, int& reached_depth) {
         if (!_time_up && candidate.row != -1) {
             best_move     = candidate;
             reached_depth = depth;
+            // Sort best-first and expose for the debug view.
+            if (ai_maximizes)
+                std::sort(this_scores.begin(), this_scores.end(),
+                    [](const SM& a, const SM& b){ return a.first > b.first; });
+            else
+                std::sort(this_scores.begin(), this_scores.end(),
+                    [](const SM& a, const SM& b){ return a.first < b.first; });
+            _debug_moves = std::move(this_scores);
         }
 
         if (_time_up) break;
