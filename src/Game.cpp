@@ -1,4 +1,4 @@
-#include "Game.hpp"
+#include "../include/Game.hpp"
 
 // Member-initialiser list constructs each field directly.
 Game::Game()
@@ -44,6 +44,29 @@ bool Game::placeStone(int row, int col) {
 
     // All checks passed — applyMove handles placement, captures, win detection, turn.
     applyMove(row, col);
+    return true;
+}
+
+// ── AI-facing interface ───────────────────────────────────────────────────────
+
+// Checks all the same rules as placeStone() but does NOT commit the move.
+// The double-three check requires temporarily placing the stone — we place it,
+// query wouldCreateDoubleThree, then immediately remove it. This is safe because
+// the search is single-threaded and we restore the board before returning.
+bool Game::isLegalMove(int row, int col) {
+    if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return false;
+    if (_board.get(row, col) != Cell::Empty) return false;
+    if (_state != GameState::Ongoing) return false;
+
+    Cell stone = (_current_player == Player::Black) ? Cell::Black : Cell::White;
+
+    // Moves that capture are always legal even if they form a double-three.
+    if (!wouldCapture(row, col, stone)) {
+        _board.set(row, col, stone);
+        bool dbl = wouldCreateDoubleThree(row, col, stone);
+        _board.set(row, col, Cell::Empty);
+        if (dbl) return false;
+    }
     return true;
 }
 
@@ -101,13 +124,18 @@ void Game::undoMove(const MoveRecord& record) {
     // Restore capture counters and game state to exactly what they were before.
     _black_captures = record.black_captures_before;
     _white_captures = record.white_captures_before;
-    _state          = record.state_before;
 
-    // The player who applied this move is the player who must move again after undo.
-    // Their turn was advanced at the end of applyMove, so we reverse that here.
-    // Exception: if the game was already over before this move (state_before != Ongoing),
-    // no toggle happened in applyMove, so we must not toggle here either.
-    if (record.state_before == GameState::Ongoing)
+    // applyMove only calls togglePlayer() when _state == Ongoing AFTER the move.
+    // _state at this point still holds the post-move value (not yet restored),
+    // so we read it now to determine whether a toggle must be reversed.
+    // Reading state_before instead would be wrong: a move that ENDS the game has
+    // state_before == Ongoing but did NOT toggle — the two conditions differ
+    // precisely in that case, causing _current_player corruption in the search.
+    bool did_toggle = (_state == GameState::Ongoing);
+
+    _state = record.state_before;
+
+    if (did_toggle)
         togglePlayer();
 }
 

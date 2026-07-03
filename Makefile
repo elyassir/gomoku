@@ -1,15 +1,16 @@
 NAME     = Gomoku
 
 CXX      = c++
-CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -Iinclude
-LDFLAGS  = -lsfml-graphics -lsfml-window -lsfml-system
+CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -I/home/$(USER)/goinfre/sfml/include -O3 -march=native
+LDFLAGS  = -L/home/$(USER)/goinfre/sfml/lib -lsfml-graphics -lsfml-window -lsfml-system
 
 SRC_DIR  = src
 OBJ_DIR  = obj
 
 SRCS     = $(SRC_DIR)/main.cpp \
            $(SRC_DIR)/Board.cpp \
-           $(SRC_DIR)/Game.cpp
+           $(SRC_DIR)/Game.cpp \
+           $(SRC_DIR)/AI.cpp
 
 OBJS     = $(SRCS:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
