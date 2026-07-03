@@ -13,8 +13,8 @@ public:
     // Find the best legal move for the current player using iterative deepening.
     // Searches depth 1, 2, 3, … until the 500ms budget is exhausted, then
     // returns the best move from the last *complete* depth.
-    // Writes the actual think time in milliseconds to elapsed_ms.
-    Move bestMove(Game& game, double& elapsed_ms);
+    // Writes the actual think time (ms) to elapsed_ms and the depth reached to reached_depth.
+    Move bestMove(Game& game, double& elapsed_ms, int& reached_depth);
 
 private:
     // Hard wall on per-move think time.

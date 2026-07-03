@@ -260,7 +260,7 @@ int AI::minimax(Game& game, int depth, bool is_maximizing, int alpha, int beta) 
 // depth-(d-1) results, making alpha-beta prune far more aggressively than a
 // cold start at depth d. The total cost of depths 1..d is roughly equal to the
 // cost of depth d alone, so the "wasted" shallower passes are negligible.
-Move AI::bestMove(Game& game, double& elapsed_ms) {
+Move AI::bestMove(Game& game, double& elapsed_ms, int& reached_depth) {
     auto t_start = std::chrono::steady_clock::now();
     _deadline    = t_start + std::chrono::milliseconds(TIME_LIMIT_MS);
 
@@ -280,7 +280,7 @@ Move AI::bestMove(Game& game, double& elapsed_ms) {
 
     bool ai_maximizes = (game.currentPlayer() == Player::Black);
     Move best_move    = candidates[0]; // fallback: first legal move
-    int  reached_depth = 0;
+    reached_depth     = 0;
 
     for (int depth = 1; depth <= MAX_DEPTH; ++depth) {
         _time_up = false;

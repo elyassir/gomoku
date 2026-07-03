@@ -7,14 +7,19 @@
 #include "../include/AI.hpp"
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-static constexpr int   WINDOW_SIZE = 700;
-static constexpr int   MARGIN      = 40;
+static constexpr int   WINDOW_SIZE  = 700;   // board square
+static constexpr int   PANEL_HEIGHT = 80;    // HUD strip below the board
+static constexpr int   MARGIN       = 40;
 // CELL_SIZE: pixel distance between adjacent intersections.
 // Divide by (BOARD_SIZE - 1) because 19 lines form 18 gaps, not 19.
 static constexpr float CELL_SIZE = (WINDOW_SIZE - 2.f * MARGIN) / (BOARD_SIZE - 1);
 
 // Stone radius is slightly less than half a cell so adjacent stones don't overlap.
 static constexpr float STONE_RADIUS = CELL_SIZE * 0.44f;
+
+// Font shipped with most Linux distros; fall back gracefully if absent.
+static const char* FONT_PATH =
+    "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf";
 
 // ── Coordinate helpers ────────────────────────────────────────────────────────
 
@@ -109,6 +114,74 @@ static void drawStones(sf::RenderWindow& window, const Board& board) {
     }
 }
 
+// ── HUD panel ─────────────────────────────────────────────────────────────────
+
+// Draw the info strip below the board: turn status, capture counts, AI timer.
+// All game-state text lives here rather than in the title bar so it's always
+// visible and clearly legible during a defense.
+static void drawHUD(sf::RenderWindow& window, const sf::Font& font,
+                    const Game& game, double ai_ms, int ai_depth)
+{
+    // Dark wood panel backing the HUD.
+    sf::RectangleShape panel({(float)WINDOW_SIZE, (float)PANEL_HEIGHT});
+    panel.setPosition(0.f, (float)WINDOW_SIZE);
+    panel.setFillColor(sf::Color(35, 25, 10));
+    window.draw(panel);
+
+    // Thin separator line between board and panel.
+    sf::RectangleShape sep({(float)WINDOW_SIZE, 2.f});
+    sep.setPosition(0.f, (float)WINDOW_SIZE);
+    sep.setFillColor(sf::Color(80, 50, 20));
+    window.draw(sep);
+
+    // ── Turn / game status (top-left) ─────────────────────────────────────────
+    std::string status;
+    sf::Color   status_col(210, 210, 210);
+    switch (game.state()) {
+        case GameState::BlackWins:
+            status     = "Black wins!   R to restart";
+            status_col = sf::Color(180, 180, 180);
+            break;
+        case GameState::WhiteWins:
+            status     = "White wins!   R to restart";
+            status_col = sf::Color(230, 230, 230);
+            break;
+        case GameState::Ongoing:
+            status = (game.currentPlayer() == Player::Black)
+                         ? "Black's turn"
+                         : "White thinking...";
+            break;
+    }
+    sf::Text t_turn(status, font, 16);
+    t_turn.setFillColor(status_col);
+    t_turn.setPosition(15.f, (float)WINDOW_SIZE + 12.f);
+    window.draw(t_turn);
+
+    // ── Capture counts (bottom-left) ──────────────────────────────────────────
+    std::string cap_str =
+        "Captures:   Black " +
+        std::to_string(game.captureCount(Player::Black)) +
+        "   White " +
+        std::to_string(game.captureCount(Player::White));
+    sf::Text t_cap(cap_str, font, 14);
+    t_cap.setFillColor(sf::Color(160, 160, 160));
+    t_cap.setPosition(15.f, (float)WINDOW_SIZE + 46.f);
+    window.draw(t_cap);
+
+    // ── AI timer + depth (top-right) — shown once the AI has played ──────────
+    if (ai_ms >= 0.0) {
+        std::string ai_str =
+            "AI   " + std::to_string(static_cast<int>(ai_ms)) +
+            "ms   depth " + std::to_string(ai_depth);
+        sf::Text t_ai(ai_str, font, 16);
+        t_ai.setFillColor(sf::Color(220, 180, 60)); // gold to draw the eye
+        // Right-align: shift so the right edge sits 15px from the window edge.
+        float tw = t_ai.getLocalBounds().width;
+        t_ai.setPosition((float)WINDOW_SIZE - tw - 15.f, (float)WINDOW_SIZE + 12.f);
+        window.draw(t_ai);
+    }
+}
+
 // ── Move logger ───────────────────────────────────────────────────────────────
 
 // Columns A–S (19 letters), rows 1–19 from the top — standard Gomoku notation.
@@ -132,8 +205,15 @@ static void logMove(int move_num, const char* player, int row, int col,
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 int main() {
+    sf::Font font;
+    bool font_ok = font.loadFromFile(FONT_PATH);
+    if (!font_ok)
+        std::cerr << "Warning: font not found at " << FONT_PATH
+                  << " — HUD text disabled\n";
+
+    // Board square + HUD strip below it.
     sf::RenderWindow window(
-        sf::VideoMode(WINDOW_SIZE, WINDOW_SIZE),
+        sf::VideoMode(WINDOW_SIZE, WINDOW_SIZE + PANEL_HEIGHT),
         "Gomoku",
         sf::Style::Titlebar | sf::Style::Close
     );
@@ -141,7 +221,8 @@ int main() {
 
     Game   game;
     AI     ai;
-    double last_ai_ms = -1.0;
+    double last_ai_ms  = -1.0;
+    int    last_depth  = 0;
     int    move_number = 0;
 
     std::cout << "=== Game Start ===\n";
@@ -161,8 +242,9 @@ int main() {
             // 'R' restarts the game from any state (mid-game or after a win).
             if (event.type == sf::Event::KeyPressed &&
                 event.key.code == sf::Keyboard::R) {
-                game       = Game();
-                last_ai_ms = -1.0;
+                game        = Game();
+                last_ai_ms  = -1.0;
+                last_depth  = 0;
                 move_number = 0;
                 std::cout << "=== Game Start ===\n";
             }
@@ -194,39 +276,22 @@ int main() {
             }
         }
 
-        // Update title and render BEFORE the AI thinks.
-        // This way the human's stone appears on screen immediately after the click;
-        // the window then freezes briefly during AI computation, and the AI stone
+        // Render BEFORE the AI thinks so the human's stone appears immediately.
+        // The window freezes briefly during AI computation; the AI stone then
         // appears in the next frame. Without this ordering both stones would appear
         // together after the full AI delay, making the input feel broken.
-        std::string title = "Gomoku — ";
-        switch (game.state()) {
-            case GameState::BlackWins: title += "Black wins!  (R to restart)"; break;
-            case GameState::WhiteWins: title += "White wins!  (R to restart)"; break;
-            case GameState::Ongoing:
-                title += (game.currentPlayer() == Player::Black)
-                             ? "Black's turn" : "White's turn (thinking...)";
-                break;
-        }
-        title += "   [B captures: " + std::to_string(game.captureCount(Player::Black))
-               + "  W captures: "  + std::to_string(game.captureCount(Player::White)) + "]";
-
-        // Show AI think time once the AI has played at least once.
-        if (last_ai_ms >= 0.0)
-            title += "   AI: " + std::to_string(static_cast<int>(last_ai_ms)) + "ms";
-
-        window.setTitle(title);
-
         window.clear();
         drawBoard(window);
         drawStones(window, game.board());
+        if (font_ok)
+            drawHUD(window, font, game, last_ai_ms, last_depth);
         window.display();
 
         // AI computes AFTER the frame is displayed so the human's stone is visible
         // before any freeze. The resulting AI stone will appear in the next frame.
         if (game.state() == GameState::Ongoing &&
             game.currentPlayer() == Player::White) {
-            Move m = ai.bestMove(game, last_ai_ms);
+            Move m = ai.bestMove(game, last_ai_ms, last_depth);
             if (m.row >= 0) {
                 int w_before  = game.captureCount(Player::White);
                 MoveRecord rec = game.applyMove(m.row, m.col);
